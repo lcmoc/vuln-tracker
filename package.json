@@ -1,0 +1,15 @@
+{
+  "name": "vuln-tracker",
+  "version": "1.0.0",
+  "description": "Showing open reports from yeswehack in the terminal",
+  "license": "ISC",
+  "author": "",
+  "type": "commonjs",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "dependencies": {
+    "commander": "^15.0.0"
+  }
+}
