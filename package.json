@@ -4,12 +4,19 @@
   "description": "Showing open reports from yeswehack in the terminal",
   "license": "ISC",
   "author": "",
-  "type": "commonjs",
+  "type": "module",
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "dependencies": {
-    "commander": "^15.0.0"
+    "chalk": "^6.0.0",
+    "commander": "^15.0.0",
+    "dotenv": "^17.4.2",
+    "inquirer": "^14.1.0",
+    "ora": "^9.4.1"
+  },
+  "bin": {
+    "check-reports": "./src/index.js"
   }
 }
