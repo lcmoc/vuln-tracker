@@ -13,10 +13,11 @@
     "chalk": "^6.0.0",
     "commander": "^15.0.0",
     "dotenv": "^17.4.2",
+    "figlet": "^1.11.4",
     "inquirer": "^14.1.0",
     "ora": "^9.4.1"
   },
   "bin": {
-    "check-reports": "./src/index.js"
+    "vt": "./src/index.js"
   }
 }
