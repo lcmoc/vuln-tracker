@@ -219,6 +219,7 @@ function normalizeReport(report) {
     cvssCriticity: cvss.criticity ?? null,
     status: report.status?.workflow_state ?? "-",
     date: report.created_at ?? null,
+    lastActivity: report.changed_at ?? report.created_at ?? null,
     link: reportLink(report.id),
   };
 }
