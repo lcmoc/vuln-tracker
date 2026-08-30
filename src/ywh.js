@@ -6,8 +6,7 @@ const YWH_API_KEY = process.env.YESWEHACK_API_KEY;
 const API_BASE_URL = "https://api.yeswehack.com";
 const REPORT_BASE_URL = "https://yeswehack.com/vulnerability-center/reports";
 const RESULTS_PER_PAGE = 100;
-const TRIAGE_STATUS_FILTER = "assessed";
-const WORKFLOW_STATE_FILTER = "under_review";
+const WORKFLOW_STATES = ["under_review", "accepted"];
 
 // How many programs / pages to keep in flight at once. YesWeHack has no
 // published rate limit; 8 is comfortably fast without tripping 429s.
@@ -197,13 +196,6 @@ export function reportLink(reportId) {
   return `${REPORT_BASE_URL}/${reportId}`;
 }
 
-function isAssessedAndOpen(report) {
-  return (
-    report.triage_status === TRIAGE_STATUS_FILTER &&
-    report.status?.workflow_state === WORKFLOW_STATE_FILTER
-  );
-}
-
 function normalizeReport(report) {
   const cvss = report.cvss ?? {};
   const assignees = report.assignees_usernames ?? [];
@@ -230,8 +222,18 @@ async function fullFetch(onProgress) {
 
   const perProgram = await pMap(programs, async (program) => {
     onProgress?.(program);
-    const raw = await fetchAllReports(program.slug, WORKFLOW_STATE_FILTER);
-    return raw.filter(isAssessedAndOpen).map(normalizeReport);
+    const pages = await Promise.all(
+      WORKFLOW_STATES.map((state) => fetchAllReports(program.slug, state))
+    );
+    const seen = new Set();
+    const results = [];
+    for (const raw of pages.flat()) {
+      if (!seen.has(raw.id)) {
+        seen.add(raw.id);
+        results.push(normalizeReport(raw));
+      }
+    }
+    return results;
   });
 
   return perProgram.flat();
@@ -253,7 +255,7 @@ async function incrementalFetch(cache, onProgress) {
   const refreshed = [];
   for (const raw of scans.flat()) {
     seenIds.add(raw.id);
-    if (isAssessedAndOpen(raw)) refreshed.push(normalizeReport(raw));
+    refreshed.push(normalizeReport(raw));
   }
 
   const untouched = cache.reports.filter((r) => !seenIds.has(r.id));

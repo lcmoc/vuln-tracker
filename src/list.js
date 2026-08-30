@@ -308,14 +308,26 @@ function buildPanelLines(report, panelWidth, bodyHeight) {
   return lines;
 }
 
+// ── modes ────────────────────────────────────────────────────────────────────
+
+const MODES = ["assessed", "under_review", "all", "accepted"];
+const MODE_LABELS = { assessed: "Assessed", under_review: "Under Review", all: "All", accepted: "Accepted" };
+const MODE_FILTERS = {
+  assessed: (r) => r.triageStatus === "assessed",
+  under_review: (r) => r.status === "under_review",
+  all: () => true,
+  accepted: (r) => r.status === "accepted",
+};
+
 // ── static (non-TTY) fallback ────────────────────────────────────────────────
 
 function renderStatic(reports) {
   const cols = process.stdout.columns || 100;
   const tableWidth = Math.min(Math.max(cols, FIXED_COLS + MIN_TITLE), 140);
-  console.log(chalk.hex(COLOR.textBright).bold("Assessed reports ") + chalk.hex(COLOR.label)(`(${reports.length})`));
+  const filtered = reports.filter(MODE_FILTERS.assessed);
+  console.log(chalk.hex(COLOR.textBright).bold("Assessed ") + chalk.hex(COLOR.label)(`(${filtered.length})`));
   console.log(tableHeaderLine(tableWidth));
-  for (const report of reports) {
+  for (const report of filtered) {
     console.log(tableRowLine(report, tableWidth, false));
   }
 }
@@ -335,10 +347,14 @@ export function runInteractiveList(reports) {
     let statusTimer = null;
     let searchMode = false;
     let searchQuery = "";
-    let visible = reports;
+    let mode = "assessed";
+    let modePickerActive = false;
+    let modePickerIdx = 0;
+    let visible = reports.filter(MODE_FILTERS[mode]);
 
     const applyFilter = () => {
-      visible = reports.filter((r) => matchesQuery(r, searchQuery));
+      const mf = MODE_FILTERS[mode];
+      visible = reports.filter((r) => mf(r) && matchesQuery(r, searchQuery));
       selected = 0;
       scrollOffset = 0;
     };
@@ -371,8 +387,9 @@ export function runInteractiveList(reports) {
 
       const out = [];
 
-      const countText = searchQuery ? `${visible.length}/${reports.length}` : `${reports.length}`;
-      out.push(chalk.hex(COLOR.textBright).bold("Assessed reports ") + chalk.hex(COLOR.label)(`(${countText})`));
+      const modeTotal = reports.filter(MODE_FILTERS[mode]).length;
+      const countText = searchQuery ? `${visible.length}/${modeTotal}` : `${modeTotal}`;
+      out.push(chalk.hex(COLOR.textBright).bold(`${MODE_LABELS[mode]} `) + chalk.hex(COLOR.label)(`(${countText})`));
 
       const matchText = `${visible.length} match${visible.length === 1 ? "" : "es"}`;
       const placeholder = "search title, program, assignee, status…";
@@ -409,17 +426,33 @@ export function runInteractiveList(reports) {
       }
 
       out.push(chalk.hex(COLOR.rule)("─".repeat(cols)));
-      out.push(
-        statusMessage
-          ? statusMessage
-          : searchMode
-            ? chalk.hex(COLOR.dim)("type to search  ·  enter apply  ·  esc cancel")
-            : chalk.hex(COLOR.dim)(
-                "↑/↓ (j/k) navigate  ·  o / enter open  ·  c copy link  ·  / search  ·  q / esc quit"
-              )
-      );
 
-      process.stdout.write("\x1B[2J\x1B[H" + out.join("\n") + "\n");
+      if (statusMessage) {
+        out.push(statusMessage);
+      } else if (searchMode) {
+        out.push(chalk.hex(COLOR.dim)("type to search  ·  enter apply  ·  esc cancel"));
+      } else if (modePickerActive) {
+        let pickerLine = chalk.hex(COLOR.label)("mode: ");
+        MODES.forEach((m, i) => {
+          const label = ` ${MODE_LABELS[m]} `;
+          if (i === modePickerIdx) {
+            pickerLine += chalk.hex(COLOR.textBright).bgHex(COLOR.selectedBg)(label);
+          } else {
+            pickerLine += chalk.hex(COLOR.dim)(label);
+          }
+          if (i < MODES.length - 1) pickerLine += "  ";
+        });
+        pickerLine += chalk.hex(COLOR.rule)("   ←→ select  enter apply  esc cancel");
+        out.push(pickerLine);
+      } else {
+        out.push(
+          chalk.hex(COLOR.dim)(
+            "↑/↓ (j/k) navigate  ·  o / enter open  ·  c copy link  ·  / search  ·  space mode  ·  q / esc quit"
+          )
+        );
+      }
+
+      process.stdout.write("\x1B[H" + out.join("\n") + "\n");
     };
 
     const cleanup = () => {
@@ -428,13 +461,52 @@ export function runInteractiveList(reports) {
       process.stdin.pause();
       process.stdin.removeListener("keypress", onKeypress);
       process.stdout.removeListener("resize", render);
-      process.stdout.write("\x1B[2J\x1B[H");
+      process.stdout.write("\x1B[?1049l");
     };
 
     const onKeypress = (str, key) => {
       if (key.ctrl && key.name === "c") {
         cleanup();
         resolve();
+        return;
+      }
+
+      if (modePickerActive) {
+        switch (key.name) {
+          case "left":
+          case "h":
+            modePickerIdx = (modePickerIdx - 1 + MODES.length) % MODES.length;
+            render();
+            break;
+          case "right":
+          case "l":
+            modePickerIdx = (modePickerIdx + 1) % MODES.length;
+            render();
+            break;
+          case "return":
+          case "space":
+            mode = MODES[modePickerIdx];
+            modePickerActive = false;
+            applyFilter();
+            render();
+            break;
+          case "escape":
+            modePickerActive = false;
+            render();
+            break;
+          default:
+            if (str >= "1" && str <= "4") {
+              const idx = parseInt(str, 10) - 1;
+              if (idx < MODES.length) {
+                modePickerIdx = idx;
+                mode = MODES[modePickerIdx];
+                modePickerActive = false;
+                applyFilter();
+                render();
+              }
+            }
+            break;
+        }
         return;
       }
 
@@ -515,6 +587,10 @@ export function runInteractiveList(reports) {
           if (str === "/") {
             searchMode = true;
             render();
+          } else if (str === " ") {
+            modePickerActive = true;
+            modePickerIdx = MODES.indexOf(mode);
+            render();
           }
           break;
       }
@@ -526,6 +602,7 @@ export function runInteractiveList(reports) {
     process.stdin.on("keypress", onKeypress);
     process.stdout.on("resize", render);
 
+    process.stdout.write("\x1B[?1049h\x1B[2J\x1B[H");
     render();
   });
 }

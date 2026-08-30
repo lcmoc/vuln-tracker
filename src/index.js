@@ -68,7 +68,7 @@ program.action(async (options) => {
 
   const username = await promptScope();
 
-  const spinner = ora("Fetching assessed reports from YesWeHack...").start();
+  const spinner = ora("Fetching reports from YesWeHack...").start();
 
   let reports;
   let source;
@@ -98,11 +98,11 @@ program.action(async (options) => {
       : "";
 
   if (reports.length === 0) {
-    spinner.info(`No assessed reports found.${sourceNote}`);
+    spinner.info(`No reports found.${sourceNote}`);
     return;
   }
 
-  spinner.succeed(`Found ${reports.length} assessed report(s).${sourceNote}`);
+  spinner.succeed(`Found ${reports.length} report(s).${sourceNote}`);
   reports.sort((a, b) => new Date(b.date ?? 0) - new Date(a.date ?? 0));
 
   await runInteractiveList(reports);
