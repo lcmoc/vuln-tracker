@@ -103,8 +103,6 @@ program.action(async (options) => {
   }
 
   spinner.succeed(`Found ${reports.length} report(s).${sourceNote}`);
-  reports.sort((a, b) => new Date(b.date ?? 0) - new Date(a.date ?? 0));
-
   await runInteractiveList(reports);
 });
 

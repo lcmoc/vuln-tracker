@@ -1,6 +1,7 @@
 import readline from "node:readline";
 import { spawn } from "node:child_process";
 import chalk from "chalk";
+import { loadConfig, saveConfig } from "./config.js";
 
 // Palette and layout mirror the "Reports Table" design canvas
 // (claude.ai/design project "Improving table readability"): a two-pane
@@ -319,6 +320,26 @@ const MODE_FILTERS = {
   accepted: (r) => r.status === "accepted",
 };
 
+// ── sort ─────────────────────────────────────────────────────────────────────
+
+const SORT_KEYS = ["date", "assignee", "status", "triageStatus", "title"];
+const SORT_LABELS = { date: "Date", assignee: "Assigned", status: "Status", triageStatus: "Triage", title: "Title" };
+const SORT_DEFAULT_DIR = { date: "desc", assignee: "asc", status: "asc", triageStatus: "asc", title: "asc" };
+
+function sortValue(report, key) {
+  switch (key) {
+    case "date": {
+      const d = new Date(report.lastActivity ?? report.date ?? 0);
+      return Number.isNaN(d.getTime()) ? 0 : d.getTime();
+    }
+    case "assignee": return (report.assignee ?? "").toLowerCase();
+    case "status":   return (report.status ?? "").toLowerCase();
+    case "triageStatus": return (report.triageStatus ?? "").toLowerCase();
+    case "title":    return (report.title ?? "").toLowerCase();
+    default:         return "";
+  }
+}
+
 // ── static (non-TTY) fallback ────────────────────────────────────────────────
 
 function renderStatic(reports) {
@@ -341,6 +362,7 @@ export function runInteractiveList(reports) {
   }
 
   return new Promise((resolve) => {
+    const cfg = loadConfig();
     let selected = 0;
     let scrollOffset = 0;
     let statusMessage = null;
@@ -350,11 +372,25 @@ export function runInteractiveList(reports) {
     let mode = "assessed";
     let modePickerActive = false;
     let modePickerIdx = 0;
-    let visible = reports.filter(MODE_FILTERS[mode]);
+    let sortBy = cfg.sortBy && SORT_KEYS.includes(cfg.sortBy) ? cfg.sortBy : "date";
+    let sortDir = cfg.sortDir === "asc" || cfg.sortDir === "desc" ? cfg.sortDir : "desc";
+    let sortPickerActive = false;
+    let sortPickerIdx = SORT_KEYS.indexOf(sortBy);
+    let visible = [];
+
+    const applySort = () => {
+      visible.sort((a, b) => {
+        const av = sortValue(a, sortBy);
+        const bv = sortValue(b, sortBy);
+        const cmp = av < bv ? -1 : av > bv ? 1 : 0;
+        return sortDir === "desc" ? -cmp : cmp;
+      });
+    };
 
     const applyFilter = () => {
       const mf = MODE_FILTERS[mode];
       visible = reports.filter((r) => mf(r) && matchesQuery(r, searchQuery));
+      applySort();
       selected = 0;
       scrollOffset = 0;
     };
@@ -444,10 +480,28 @@ export function runInteractiveList(reports) {
         });
         pickerLine += chalk.hex(COLOR.rule)("   ←→ select  enter apply  esc cancel");
         out.push(pickerLine);
+      } else if (sortPickerActive) {
+        let pickerLine = chalk.hex(COLOR.label)("sort: ");
+        SORT_KEYS.forEach((k, i) => {
+          const isActive = k === sortBy;
+          const dirMark = isActive ? (sortDir === "desc" ? " ↓" : " ↑") : "";
+          const label = ` ${SORT_LABELS[k]}${dirMark} `;
+          if (i === sortPickerIdx) {
+            pickerLine += chalk.hex(COLOR.textBright).bgHex(COLOR.selectedBg)(label);
+          } else if (isActive) {
+            pickerLine += chalk.hex(COLOR.cyan)(label);
+          } else {
+            pickerLine += chalk.hex(COLOR.dim)(label);
+          }
+          if (i < SORT_KEYS.length - 1) pickerLine += "  ";
+        });
+        pickerLine += chalk.hex(COLOR.rule)("   ←→ select  enter apply  esc cancel");
+        out.push(pickerLine);
       } else {
+        const sortLabel = `${SORT_LABELS[sortBy]}${sortDir === "desc" ? "↓" : "↑"}`;
         out.push(
           chalk.hex(COLOR.dim)(
-            "↑/↓ (j/k) navigate  ·  o / enter open  ·  c copy link  ·  / search  ·  space mode  ·  q / esc quit"
+            `↑/↓ (j/k) navigate  ·  o / enter open  ·  c copy link  ·  / search  ·  space mode  ·  s sort [${sortLabel}]  ·  q / esc quit`
           )
         );
       }
@@ -505,6 +559,43 @@ export function runInteractiveList(reports) {
                 render();
               }
             }
+            break;
+        }
+        return;
+      }
+
+      if (sortPickerActive) {
+        switch (key.name) {
+          case "left":
+          case "h":
+            sortPickerIdx = (sortPickerIdx - 1 + SORT_KEYS.length) % SORT_KEYS.length;
+            render();
+            break;
+          case "right":
+          case "l":
+            sortPickerIdx = (sortPickerIdx + 1) % SORT_KEYS.length;
+            render();
+            break;
+          case "return":
+          case "space": {
+            const newKey = SORT_KEYS[sortPickerIdx];
+            if (newKey === sortBy) {
+              sortDir = sortDir === "asc" ? "desc" : "asc";
+            } else {
+              sortBy = newKey;
+              sortDir = SORT_DEFAULT_DIR[newKey];
+            }
+            sortPickerActive = false;
+            applySort();
+            saveConfig({ ...loadConfig(), sortBy, sortDir });
+            render();
+            break;
+          }
+          case "escape":
+            sortPickerActive = false;
+            render();
+            break;
+          default:
             break;
         }
         return;
@@ -591,6 +682,10 @@ export function runInteractiveList(reports) {
             modePickerActive = true;
             modePickerIdx = MODES.indexOf(mode);
             render();
+          } else if (str === "s") {
+            sortPickerActive = true;
+            sortPickerIdx = SORT_KEYS.indexOf(sortBy);
+            render();
           }
           break;
       }
@@ -601,6 +696,8 @@ export function runInteractiveList(reports) {
     process.stdin.resume();
     process.stdin.on("keypress", onKeypress);
     process.stdout.on("resize", render);
+
+    applyFilter();
 
     process.stdout.write("\x1B[?1049h\x1B[2J\x1B[H");
     render();
