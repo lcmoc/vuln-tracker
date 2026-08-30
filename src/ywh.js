@@ -218,6 +218,7 @@ function normalizeReport(report) {
     cvssScore: cvss.score ?? null,
     cvssCriticity: cvss.criticity ?? null,
     status: report.status?.workflow_state ?? "-",
+    triageStatus: report.triage_status ?? null,
     date: report.created_at ?? null,
     lastActivity: report.changed_at ?? report.created_at ?? null,
     link: reportLink(report.id),

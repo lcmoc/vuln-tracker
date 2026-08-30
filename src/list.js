@@ -29,6 +29,13 @@ const SEV = {
 };
 const sevOf = (criticity) => SEV[criticity] || SEV.I;
 
+const TRIAGE_COLOR = {
+  assessed: "#3fb955",
+  pending: "#f5c518",
+};
+const triageColorOf = (ts) => TRIAGE_COLOR[ts] || "#8a919c";
+const triageLabelOf = (ts) => String(ts || "-").replace(/_/g, " ");
+
 const STATUS_COLOR = {
   new: "#56c2ff",
   under_review: "#56c2ff",
@@ -48,11 +55,11 @@ const statusLabelOf = (status) => String(status || "-").replace(/_/g, " ");
 
 // Table geometry: bar | marker | TITLE | PROGRAM | ASSIGNEE | CVSS | STATUS,
 // with single-space gaps. Everything except TITLE is fixed width.
-const COL = { bar: 1, marker: 1, program: 12, assignee: 10, cvss: 7, status: 15, date: 10 };
-const GAPS = 14; // 7 gaps × 2 spaces each
+const COL = { bar: 1, marker: 1, program: 12, assignee: 10, cvss: 7, status: 15, date: 10, triage: 10 };
+const GAPS = 16; // 8 gaps × 2 spaces each
 // Everything in a row except the TITLE column.
 const FIXED_COLS =
-  COL.bar + COL.marker + COL.program + COL.assignee + COL.cvss + COL.status + COL.date + GAPS;
+  COL.bar + COL.marker + COL.program + COL.assignee + COL.cvss + COL.status + COL.date + COL.triage + GAPS;
 const MIN_TITLE = 12;
 const PANEL_MIN = 30;
 const PANEL_MAX = 44;
@@ -157,8 +164,9 @@ function tableHeaderLine(tableWidth) {
     cell("PROGRAM", COL.program, opt) + g +
     cell("ASSIGNEE", COL.assignee, opt) + g +
     cell("CVSS", COL.cvss, { ...opt, align: "right" }) + g +
+    cell("TRIAGE", COL.triage, opt) + g +
     cell("STATUS", COL.status, opt);
-  const used = 6 + titleW + 2 + COL.program + 2 + COL.assignee + 2 + COL.cvss + 2 + COL.status + 2 + COL.date;
+  const used = 6 + titleW + 2 + COL.program + 2 + COL.assignee + 2 + COL.cvss + 2 + COL.triage + 2 + COL.status + 2 + COL.date;
   return line + pad(tableWidth - used);
 }
 
@@ -188,6 +196,12 @@ function tableRowLine(report, tableWidth, isSelected, rowIndex) {
     cvss = pad(COL.cvss - (txt.length + 2), bg) + badge;
   }
 
+  const tc = triageColorOf(report.triageStatus);
+  let triageTxt = `● ${triageLabelOf(report.triageStatus)}`;
+  if (triageTxt.length > COL.triage) triageTxt = triageTxt.slice(0, COL.triage - 1) + "…";
+  let triage = chalk.hex(tc)(triageTxt.padEnd(COL.triage));
+  if (bg) triage = chalk.bgHex(bg)(triage);
+
   const sc = statusColorOf(report.status);
   let statusTxt = `● ${statusLabelOf(report.status)}`;
   if (statusTxt.length > COL.status) statusTxt = statusTxt.slice(0, COL.status - 1) + "…";
@@ -197,9 +211,9 @@ function tableRowLine(report, tableWidth, isSelected, rowIndex) {
   const dateVal = formatDate(report.lastActivity ?? report.date);
   const date = cell(dateVal, COL.date, { fg: COLOR.label, bg });
 
-  const used = 6 + titleW + 2 + COL.program + 2 + COL.assignee + 2 + COL.cvss + 2 + COL.status + 2 + COL.date;
+  const used = 6 + titleW + 2 + COL.program + 2 + COL.assignee + 2 + COL.cvss + 2 + COL.triage + 2 + COL.status + 2 + COL.date;
   return (
-    bar + g + marker + g + date + g + title + g + program + g + assignee + g + cvss + g + status +
+    bar + g + marker + g + date + g + title + g + program + g + assignee + g + cvss + g + triage + g + status +
     pad(tableWidth - used, bg)
   );
 }
@@ -279,6 +293,8 @@ function buildPanelLines(report, panelWidth, bodyHeight) {
 
   lines.push(kv("Program", report.program));
   lines.push(kv("Assignee", report.assignee, COLOR.cyan));
+  lines.push(blank());
+  lines.push(kv("Triage", triageLabelOf(report.triageStatus), triageColorOf(report.triageStatus)));
   lines.push(blank());
   lines.push(kv("Report ID", report.localId));
   lines.push(kv("Last activity", formatDate(report.lastActivity ?? report.date)));
@@ -516,7 +532,7 @@ export function runInteractiveList(reports) {
 
 function matchesQuery(report, query) {
   if (!query) return true;
-  const haystack = [report.title, report.program, report.assignee, report.localId, report.status]
+  const haystack = [report.title, report.program, report.assignee, report.localId, report.status, report.triageStatus]
     .join(" ")
     .toLowerCase();
   return haystack.includes(query.toLowerCase());
