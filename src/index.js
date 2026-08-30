@@ -9,7 +9,7 @@ import inquirer from "inquirer";
 import { program } from "commander";
 
 import { getAssessedReports } from "./ywh.js";
-import { runInteractiveList } from "./list.js";
+import { runInteractiveList } from "./tui/list.js";
 import { loadConfig, saveConfig } from "./config.js";
 
 function formatAge(ms) {
