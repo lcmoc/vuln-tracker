@@ -10,6 +10,7 @@ const COLOR = {
   rule: "#23272e",
   border: "#1c2027",
   panelBg: "#101318",
+  rowAlt: "#131820",
   selectedBg: "#182430",
   label: "#6b7280",
   dim: "#4b5158",
@@ -47,11 +48,11 @@ const statusLabelOf = (status) => String(status || "-").replace(/_/g, " ");
 
 // Table geometry: bar | marker | TITLE | PROGRAM | ASSIGNEE | CVSS | STATUS,
 // with single-space gaps. Everything except TITLE is fixed width.
-const COL = { bar: 1, marker: 1, program: 12, assignee: 10, cvss: 7, status: 15 };
-const GAPS = 6; // bar–marker, marker–title, title–program, program–assignee, assignee–cvss, cvss–status
+const COL = { bar: 1, marker: 1, program: 12, assignee: 10, cvss: 7, status: 15, date: 10 };
+const GAPS = 14; // 7 gaps × 2 spaces each
 // Everything in a row except the TITLE column.
 const FIXED_COLS =
-  COL.bar + COL.marker + COL.program + COL.assignee + COL.cvss + COL.status + GAPS;
+  COL.bar + COL.marker + COL.program + COL.assignee + COL.cvss + COL.status + COL.date + GAPS;
 const MIN_TITLE = 12;
 const PANEL_MIN = 30;
 const PANEL_MAX = 44;
@@ -147,27 +148,29 @@ function cvssText(report) {
 
 function tableHeaderLine(tableWidth) {
   const titleW = titleColWidth(tableWidth);
-  const g = " ";
+  const g = "  ";
   const opt = { fg: COLOR.label, bold: true };
   let line =
     cell("", 1) + g + cell("", 1) + g +
+    cell("DATE", COL.date, opt) + g +
     cell("TITLE", titleW, opt) + g +
     cell("PROGRAM", COL.program, opt) + g +
     cell("ASSIGNEE", COL.assignee, opt) + g +
     cell("CVSS", COL.cvss, { ...opt, align: "right" }) + g +
     cell("STATUS", COL.status, opt);
-  const used = 4 + titleW + 1 + COL.program + 1 + COL.assignee + 1 + COL.cvss + 1 + COL.status;
+  const used = 6 + titleW + 2 + COL.program + 2 + COL.assignee + 2 + COL.cvss + 2 + COL.status + 2 + COL.date;
   return line + pad(tableWidth - used);
 }
 
-function tableRowLine(report, tableWidth, isSelected) {
+function tableRowLine(report, tableWidth, isSelected, rowIndex) {
   const titleW = titleColWidth(tableWidth);
   const sev = sevOf(report.cvssCriticity);
-  const bg = isSelected ? COLOR.selectedBg : undefined;
-  const g = isSelected ? chalk.bgHex(COLOR.selectedBg)(" ") : " ";
+  const altBg = rowIndex % 2 === 1 ? COLOR.rowAlt : undefined;
+  const bg = isSelected ? COLOR.selectedBg : altBg;
+  const g = bg ? chalk.bgHex(bg)("  ") : "  ";
 
-  const bar = isSelected
-    ? chalk.bgHex(COLOR.selectedBg).hex(sev.bar)("▌")
+  const bar = bg
+    ? chalk.bgHex(bg).hex(sev.bar)("▌")
     : chalk.hex(sev.bar)("▌");
   const marker = cell(isSelected ? "▸" : " ", 1, { fg: COLOR.cyan, bg });
   const title = cell(report.title, titleW, { fg: isSelected ? COLOR.textBright : COLOR.text, bg });
@@ -189,11 +192,14 @@ function tableRowLine(report, tableWidth, isSelected) {
   let statusTxt = `● ${statusLabelOf(report.status)}`;
   if (statusTxt.length > COL.status) statusTxt = statusTxt.slice(0, COL.status - 1) + "…";
   let status = chalk.hex(sc)(statusTxt.padEnd(COL.status));
-  if (isSelected) status = chalk.bgHex(COLOR.selectedBg)(status);
+  if (bg) status = chalk.bgHex(bg)(status);
 
-  const used = 4 + titleW + 1 + COL.program + 1 + COL.assignee + 1 + COL.cvss + 1 + COL.status;
+  const dateVal = formatDate(report.lastActivity ?? report.date);
+  const date = cell(dateVal, COL.date, { fg: COLOR.label, bg });
+
+  const used = 6 + titleW + 2 + COL.program + 2 + COL.assignee + 2 + COL.cvss + 2 + COL.status + 2 + COL.date;
   return (
-    bar + g + marker + g + title + g + program + g + assignee + g + cvss + g + status +
+    bar + g + marker + g + date + g + title + g + program + g + assignee + g + cvss + g + status +
     pad(tableWidth - used, bg)
   );
 }
@@ -208,7 +214,7 @@ function buildTableLines(visible, tableWidth, selected, scrollOffset, visibleRow
   } else {
     for (let i = 0; i < visibleRows; i++) {
       const idx = scrollOffset + i;
-      lines.push(idx < visible.length ? tableRowLine(visible[idx], tableWidth, idx === selected) : pad(tableWidth));
+      lines.push(idx < visible.length ? tableRowLine(visible[idx], tableWidth, idx === selected, idx) : pad(tableWidth));
     }
   }
   return lines;
@@ -217,7 +223,7 @@ function buildTableLines(visible, tableWidth, selected, scrollOffset, visibleRow
 // ── detail panel ─────────────────────────────────────────────────────────────
 
 function buildPanelLines(report, panelWidth, bodyHeight) {
-  const inner = panelWidth - 2;
+  const inner = panelWidth - 4;
   const blank = () => chalk.bgHex(COLOR.panelBg)(" ".repeat(panelWidth));
 
   // Render inline segments, pad the row to `inner`, frame it with the panel bg.
@@ -232,7 +238,7 @@ function buildPanelLines(report, panelWidth, bodyHeight) {
       })
       .join("");
     if (plain.length < inner) styled += " ".repeat(inner - plain.length);
-    return chalk.bgHex(COLOR.panelBg)(" " + styled + " ");
+    return chalk.bgHex(COLOR.panelBg)("  " + styled + "  ");
   };
 
   const lines = [];
@@ -252,6 +258,7 @@ function buildPanelLines(report, panelWidth, bodyHeight) {
   };
 
   lines.push(row([{ t: "SELECTED REPORT", fg: COLOR.dim, bold: true }]));
+  lines.push(blank());
   for (const tl of wrapText(report.title, inner, 3)) {
     lines.push(row([{ t: tl, fg: COLOR.textBright, bold: true }]));
   }
@@ -265,13 +272,14 @@ function buildPanelLines(report, panelWidth, bodyHeight) {
   const plainPill = ` ${ct} ` + "  " + statusStr;
   lines.push(
     chalk.bgHex(COLOR.panelBg)(
-      " " + styledPill + (plainPill.length < inner ? " ".repeat(inner - plainPill.length) : "") + " "
+      "  " + styledPill + (plainPill.length < inner ? " ".repeat(inner - plainPill.length) : "") + "  "
     )
   );
   lines.push(blank());
 
   lines.push(kv("Program", report.program));
   lines.push(kv("Assignee", report.assignee, COLOR.cyan));
+  lines.push(blank());
   lines.push(kv("Report ID", report.localId));
   lines.push(kv("Last activity", formatDate(report.lastActivity ?? report.date)));
 
