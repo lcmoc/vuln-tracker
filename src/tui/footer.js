@@ -7,6 +7,10 @@ const PICKER_HELP = "   ←→ select  enter apply  esc cancel";
 
 export const SEARCH_HELP = chalk.hex(COLOR.dim)("type to search  ·  enter apply  ·  esc cancel");
 
+export const FILTER_OVERLAY_HELP = chalk.hex(COLOR.dim)(
+  "↑/↓ (j/k) move  ·  space select  ·  u unassigned  ·  m mine  ·  g clear  ·  esc close"
+);
+
 export function modePickerLine(activeIdx) {
   let line = chalk.hex(COLOR.label)("mode: ");
   MODES.forEach((m, i) => {
@@ -41,6 +45,6 @@ export function sortPickerLine(activeIdx, sortBy, sortDir) {
 export function hintLine(sortBy, sortDir) {
   const sortLabel = `${SORT_LABELS[sortBy]}${sortDir === "desc" ? "↓" : "↑"}`;
   return chalk.hex(COLOR.dim)(
-    `↑/↓ (j/k) navigate  ·  o / enter open  ·  c copy link  ·  / search  ·  space mode  ·  s sort [${sortLabel}]  ·  q / esc quit`
+    `↑/↓ (j/k) navigate  ·  o / enter open  ·  c copy link  ·  / search  ·  f filter  ·  space mode  ·  s sort [${sortLabel}]  ·  q / esc quit`
   );
 }

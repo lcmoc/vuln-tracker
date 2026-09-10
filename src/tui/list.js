@@ -18,8 +18,20 @@ import {
   SORT_DEFAULT_DIR,
   sortValue,
   matchesQuery,
+  DEFAULT_FILTERS,
+  ASSIGNEE_UNASSIGNED,
+  ASSIGNEE_ME,
+  normalizeFilters,
+  matchesFilters,
+  filtersActive,
+  describeFilters,
 } from "./filters.js";
-import { modePickerLine, sortPickerLine, hintLine, SEARCH_HELP } from "./footer.js";
+import {
+  buildFilterItems,
+  buildFilterOverlayLines,
+  selectableIndexes,
+} from "./filterOverlay.js";
+import { modePickerLine, sortPickerLine, hintLine, SEARCH_HELP, FILTER_OVERLAY_HELP } from "./footer.js";
 
 // ── static (non-TTY) fallback ────────────────────────────────────────────────
 
@@ -44,6 +56,7 @@ export function runInteractiveList(reports) {
 
   return new Promise((resolve) => {
     const cfg = loadConfig();
+    const meUsername = cfg.ywhUsername || null;
     let selected = 0;
     let scrollOffset = 0;
     let statusMessage = null;
@@ -53,6 +66,29 @@ export function runInteractiveList(reports) {
     let mode = "assessed";
     let modePickerActive = false;
     let modePickerIdx = 0;
+
+    // Structured filters (program / severity floor / assignee), persisted.
+    let filters = normalizeFilters(cfg.filters);
+    {
+      const programSet = new Set(reports.map((r) => r.program));
+      if (filters.program && !programSet.has(filters.program)) filters.program = null;
+      const assigneeSet = new Set(reports.flatMap((r) => r.assignees ?? []));
+      if (
+        filters.assignee &&
+        filters.assignee !== ASSIGNEE_UNASSIGNED &&
+        filters.assignee !== ASSIGNEE_ME &&
+        !assigneeSet.has(filters.assignee)
+      ) {
+        filters.assignee = null;
+      }
+    }
+    let filterOverlayActive = false;
+    let filterCursor = 0;
+    let filterScroll = 0;
+
+    const persistFilters = () => {
+      saveConfig({ ...loadConfig(), filters });
+    };
     let sortBy = cfg.sortBy && SORT_KEYS.includes(cfg.sortBy) ? cfg.sortBy : "date";
     let sortDir = cfg.sortDir === "asc" || cfg.sortDir === "desc" ? cfg.sortDir : "desc";
     let sortPickerActive = false;
@@ -70,10 +106,34 @@ export function runInteractiveList(reports) {
 
     const applyFilter = () => {
       const mf = MODE_FILTERS[mode];
-      visible = reports.filter((r) => mf(r) && matchesQuery(r, searchQuery));
+      visible = reports.filter(
+        (r) => mf(r) && matchesFilters(r, filters, meUsername) && matchesQuery(r, searchQuery)
+      );
       applySort();
       selected = 0;
       scrollOffset = 0;
+    };
+
+    // Option lists/counts for the overlay reflect the mode + search context,
+    // not the structured filters themselves, so every choice stays reachable.
+    const currentFilterItems = () =>
+      buildFilterItems(
+        reports.filter((r) => MODE_FILTERS[mode](r) && matchesQuery(r, searchQuery)),
+        filters,
+        meUsername
+      );
+
+    const toggleMine = () => {
+      if (!meUsername) {
+        flashStatus(
+          chalk.hex(ACCENT.error)('No YesWeHack username saved — re-run and choose "Only my reports".')
+        );
+        return;
+      }
+      filters.assignee = filters.assignee === ASSIGNEE_ME ? null : ASSIGNEE_ME;
+      applyFilter();
+      persistFilters();
+      render();
     };
 
     const flashStatus = (message) => {
@@ -105,12 +165,22 @@ export function runInteractiveList(reports) {
       const out = [];
 
       const modeTotal = reports.filter(MODE_FILTERS[mode]).length;
-      const countText = searchQuery ? `${visible.length}/${modeTotal}` : `${modeTotal}`;
-      out.push(chalk.hex(COLOR.textBright).bold(`${MODE_LABELS[mode]} `) + chalk.hex(COLOR.label)(`(${countText})`));
+      const narrowed = searchQuery || filtersActive(filters);
+      const countText = narrowed ? `${visible.length}/${modeTotal}` : `${modeTotal}`;
+      let countLine =
+        chalk.hex(COLOR.textBright).bold(`${MODE_LABELS[mode]} `) + chalk.hex(COLOR.label)(`(${countText})`);
+      if (filtersActive(filters)) {
+        countLine += chalk.hex(COLOR.label)("   ·   ") + chalk.hex(COLOR.cyan)(describeFilters(filters, meUsername));
+      }
+      out.push(countLine);
 
       const matchText = `${visible.length} match${visible.length === 1 ? "" : "es"}`;
       const placeholder = "search title, program, assignee, status…";
-      if (searchMode) {
+      if (filterOverlayActive) {
+        out.push(
+          chalk.hex(COLOR.textBright).bold("FILTERS  ") + chalk.hex(COLOR.dim)(matchText)
+        );
+      } else if (searchMode) {
         out.push(
           chalk.hex(COLOR.cyan)("/ ") + chalk.hex(COLOR.text)(searchQuery) +
           chalk.hex(COLOR.cyan)("█") + "  " + chalk.hex(COLOR.dim)(matchText)
@@ -125,20 +195,34 @@ export function runInteractiveList(reports) {
 
       out.push(chalk.hex(COLOR.rule)("─".repeat(cols)));
 
-      const leftLines = buildTableLines(
-        visible, tableWidth, selected, scrollOffset, bodyHeight - 2, searchQuery
-      );
-      const rightLines = showPanel
-        ? buildPanelLines(visible[selected] || null, panelWidth, bodyHeight)
-        : null;
+      if (filterOverlayActive) {
+        const items = currentFilterItems();
+        const sel = selectableIndexes(items);
+        if (sel.length) {
+          if (!sel.includes(filterCursor)) filterCursor = sel[0];
+          if (filterCursor < filterScroll) filterScroll = filterCursor;
+          if (filterCursor >= filterScroll + bodyHeight) filterScroll = filterCursor - bodyHeight + 1;
+          filterScroll = Math.max(0, Math.min(filterScroll, Math.max(0, items.length - bodyHeight)));
+        }
+        for (const line of buildFilterOverlayLines(items, filterCursor, filterScroll, bodyHeight, cols)) {
+          out.push(line);
+        }
+      } else {
+        const leftLines = buildTableLines(
+          visible, tableWidth, selected, scrollOffset, bodyHeight - 2, searchQuery
+        );
+        const rightLines = showPanel
+          ? buildPanelLines(visible[selected] || null, panelWidth, bodyHeight)
+          : null;
 
-      for (let i = 0; i < bodyHeight; i++) {
-        const left = leftLines[i] ?? pad(tableWidth);
-        if (showPanel) {
-          const right = rightLines[i] ?? chalk.bgHex(COLOR.panelBg)(" ".repeat(panelWidth));
-          out.push(left + chalk.hex(COLOR.rule)("│") + right);
-        } else {
-          out.push(left);
+        for (let i = 0; i < bodyHeight; i++) {
+          const left = leftLines[i] ?? pad(tableWidth);
+          if (showPanel) {
+            const right = rightLines[i] ?? chalk.bgHex(COLOR.panelBg)(" ".repeat(panelWidth));
+            out.push(left + chalk.hex(COLOR.rule)("│") + right);
+          } else {
+            out.push(left);
+          }
         }
       }
 
@@ -146,6 +230,8 @@ export function runInteractiveList(reports) {
 
       if (statusMessage) {
         out.push(statusMessage);
+      } else if (filterOverlayActive) {
+        out.push(FILTER_OVERLAY_HELP);
       } else if (searchMode) {
         out.push(SEARCH_HELP);
       } else if (modePickerActive) {
@@ -271,6 +357,70 @@ export function runInteractiveList(reports) {
       }
     };
 
+    const handleFilterOverlayKey = (str, key) => {
+      const items = currentFilterItems();
+      const sel = selectableIndexes(items);
+
+      const move = (delta) => {
+        if (!sel.length) return;
+        const pos = sel.indexOf(filterCursor);
+        filterCursor = sel[((pos === -1 ? 0 : pos) + delta + sel.length) % sel.length];
+        render();
+      };
+
+      const applyOption = () => {
+        const it = items[filterCursor];
+        if (!it || it.kind !== "option") return;
+        if (it.section === "program") filters.program = it.value;
+        else if (it.section === "severity") filters.severityFloor = it.value;
+        else if (it.section === "assignee") filters.assignee = it.value;
+        applyFilter();
+        persistFilters();
+        render();
+      };
+
+      switch (key.name) {
+        case "up":
+          move(-1);
+          break;
+        case "down":
+          move(1);
+          break;
+        case "k":
+          if (!key.ctrl && !key.meta) move(-1);
+          break;
+        case "j":
+          if (!key.ctrl && !key.meta) move(1);
+          break;
+        case "return":
+        case "space":
+          applyOption();
+          break;
+        case "escape":
+          filterOverlayActive = false;
+          render();
+          break;
+        default:
+          if (str === "f") {
+            filterOverlayActive = false;
+            render();
+          } else if (str === "g") {
+            filters = { ...DEFAULT_FILTERS };
+            applyFilter();
+            persistFilters();
+            render();
+          } else if (str === "u") {
+            filters.assignee = filters.assignee === ASSIGNEE_UNASSIGNED ? null : ASSIGNEE_UNASSIGNED;
+            applyFilter();
+            persistFilters();
+            render();
+          } else if (str === "m") {
+            toggleMine();
+          }
+          break;
+      }
+    };
+
     const handleListKey = (str, key) => {
       switch (key.name) {
         case "up":
@@ -329,6 +479,26 @@ export function runInteractiveList(reports) {
             sortPickerActive = true;
             sortPickerIdx = SORT_KEYS.indexOf(sortBy);
             render();
+          } else if (str === "f") {
+            filterOverlayActive = true;
+            const sel = selectableIndexes(currentFilterItems());
+            filterCursor = sel.length ? sel[0] : 0;
+            filterScroll = 0;
+            render();
+          } else if (str === "g") {
+            if (filtersActive(filters)) {
+              filters = { ...DEFAULT_FILTERS };
+              applyFilter();
+              persistFilters();
+              flashStatus(chalk.hex(ACCENT.ok)("Filters cleared"));
+            }
+          } else if (str === "u") {
+            filters.assignee = filters.assignee === ASSIGNEE_UNASSIGNED ? null : ASSIGNEE_UNASSIGNED;
+            applyFilter();
+            persistFilters();
+            render();
+          } else if (str === "m") {
+            toggleMine();
           }
           break;
       }
@@ -342,6 +512,7 @@ export function runInteractiveList(reports) {
       }
       if (modePickerActive) return handleModePickerKey(str, key);
       if (sortPickerActive) return handleSortPickerKey(str, key);
+      if (filterOverlayActive) return handleFilterOverlayKey(str, key);
       if (searchMode) return handleSearchKey(str, key);
       handleListKey(str, key);
     };
