@@ -2,6 +2,10 @@
 
 Browse YesWeHack reports that triagers have assessed, from the terminal.
 
+![The report list with the detail panel open](docs/screenshot-list.png)
+
+<sub>Screenshots use synthetic demo data — programs, report titles, and usernames are made up.</sub>
+
 ## Setup
 
 1. Install dependencies:
@@ -37,6 +41,25 @@ Without `npm link`, run it directly with `node src/index.js`.
 
 Choosing "only my reports" prompts once for your YesWeHack username and stores
 it in `~/.config/vuln-tracker/config.json`.
+
+## In the list
+
+Navigate with `↑`/`↓` (or `j`/`k`), `o`/`enter` opens the report in the browser,
+`c` copies its link. `space` switches view mode (Assessed / Under Review / All /
+Accepted) and `s` cycles the sort key.
+
+**Search** — press `/` and type to match against title, program, assignee, and
+status as you go.
+
+![Incremental search filtering the list](docs/screenshot-search.png)
+
+**Filters** — press `f` for the overlay: filter by program, a minimum CVSS
+severity floor, or assignee (with `unassigned` and `me` shortcuts). The active
+filter shows in the header and `g` clears it.
+
+![The filter overlay](docs/screenshot-filters.png)
+
+![The list narrowed to a single program](docs/screenshot-filtered.png)
 
 ## Optional environment variables
 
