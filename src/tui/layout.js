@@ -19,3 +19,25 @@ export const titleColWidth = (tableWidth) => Math.max(MIN_TITLE, tableWidth - FI
 // fill. Kept in one place so the header and body can never drift apart.
 export const rowContentWidth = (titleW) =>
   6 + titleW + 2 + COL.program + 2 + COL.assignee + 2 + COL.cvss + 2 + COL.triage + 2 + COL.status + 2 + COL.date;
+
+// Responsive column visibility. Optional columns are hidden in order of
+// decreasing importance as the table narrows. Each breakpoint is the minimum
+// tableWidth that leaves at least MIN_TITLE chars for the title while showing
+// that column (assuming less-important columns are already hidden).
+//
+//   All cols:                  FIXED_COLS + MIN_TITLE = 94
+//   Hide ASSIGNEE (saves 12):  FIXED_COLS - 12 + MIN_TITLE = 82
+//   Hide TRIAGE too (saves 12): FIXED_COLS - 24 + MIN_TITLE = 70
+//   Hide PROGRAM too (saves 14): FIXED_COLS - 38 + MIN_TITLE = 56  (absolute minimum)
+export function computeLayout(tableWidth) {
+  const showAssignee = tableWidth >= FIXED_COLS + MIN_TITLE;
+  const showTriage   = tableWidth >= FIXED_COLS - (COL.assignee + 2) + MIN_TITLE;
+  const showProgram  = tableWidth >= FIXED_COLS - (COL.assignee + 2) - (COL.triage + 2) + MIN_TITLE;
+  const fixedW =
+    FIXED_COLS -
+    (showAssignee ? 0 : COL.assignee + 2) -
+    (showTriage   ? 0 : COL.triage   + 2) -
+    (showProgram  ? 0 : COL.program  + 2);
+  const titleW = Math.max(MIN_TITLE, tableWidth - fixedW);
+  return { showProgram, showAssignee, showTriage, titleW, fixedW };
+}
